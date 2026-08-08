@@ -359,10 +359,29 @@ export function buildSettingsModal(tracks, opts, updateCallback) {
 
 export function buildFilterModal(tracks, filters, finishCallback) {
     let maxDate = new Date().toISOString().split('T')[0];
+
+    const years = [...new Set(
+        tracks
+            .filter(t => t.timestamp instanceof Date && !isNaN(t.timestamp))
+            .map(t => t.timestamp.getFullYear())
+    )].sort((a, b) => b - a);
+
+    const yearButtons = years.map(y =>
+        `<button type="button" class="year-preset" data-year="${y}">${y}</button>`
+    ).join('');
+
     let modalContent = `
 <h3>Filter Displayed Tracks</h3>
 
 <form id="settings">
+    ${years.length > 0 ? `
+    <span class="form-row">
+        <label>Year:</label>
+        <span class="year-presets">${yearButtons}
+            <button type="button" class="year-preset year-preset--clear" data-year="">All</button>
+        </span>
+    </span>` : ''}
+
     <span class="form-row">
         <label for="minDate">Start date:</label>
         <input type="date" id="minDate" name="minDate"
@@ -388,6 +407,23 @@ export function buildFilterModal(tracks, filters, finishCallback) {
         overlayStyles: (styles) => {
             styles.opacity = 0.1;
         },
+    });
+
+    modal.afterCreate(() => {
+        document.querySelectorAll('.year-preset').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const year = btn.dataset.year;
+                const minInput = document.getElementById('minDate');
+                const maxInput = document.getElementById('maxDate');
+                if (year) {
+                    minInput.value = `${year}-01-01`;
+                    maxInput.value = `${year}-12-31`;
+                } else {
+                    minInput.value = '';
+                    maxInput.value = '';
+                }
+            });
+        });
     });
 
     modal.afterClose((modal) => {

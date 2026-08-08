@@ -56,6 +56,25 @@ form {
     box-sizing: border-box;
 }
 
+.year-presets {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    vertical-align: top;
+    width: 320px;
+}
+
+.year-preset {
+    width: auto !important;
+    padding: 2px 8px;
+    cursor: pointer;
+    font-size: 0.85em;
+}
+
+.year-preset--clear {
+    font-style: italic;
+}
+
 .failures {
     color: red;
 }
