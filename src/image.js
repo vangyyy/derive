@@ -1,56 +1,63 @@
-import EXIF from 'exif-js';
+import exifr from 'exifr';
 
-
-function degMinSecToDecimal(dms, isNegative) {
-    const absDecimal = dms[0].numerator + dms[1].numerator /
-        (60 * dms[1].denominator) + dms[2].numerator / 
-        (3600 * dms[2].denominator);
-    return absDecimal * (isNegative ? -1 : 1);
-}
 
 export default class Image {
     constructor(imageFile) {
         this.imageFile = imageFile;
+        this.exifPromise = null;
     }
 
     async hasGeolocationData() {
-        const latitude = await this.latitude();
-        const longitude = await this.longitude();
-        return latitude && longitude;
+        const gps = await this.gps();
+        return gps !== null;
     }
 
     async width() {
-        await this.extractExifData();
-        return EXIF.getTag(this.imageFile, 'PixelXDimension');
+        const exif = await this.exif();
+        return exif ? exif.ExifImageWidth : undefined;
     }
 
     async height() {
-        await this.extractExifData();
-        return EXIF.getTag(this.imageFile, 'PixelYDimension');
+        const exif = await this.exif();
+        return exif ? exif.ExifImageHeight : undefined;
     }
 
     async latitude() {
-        await this.extractExifData();
-        const latitude = EXIF.getTag(this.imageFile, 'GPSLatitude');
-        const latRef = EXIF.getTag(this.imageFile, 'GPSLatitudeRef');
+        const gps = await this.gps();
 
-        if (!latitude || !latRef) { throw 'No latitude data'; }
+        if (gps === null) { throw 'No latitude data'; }
 
-        return degMinSecToDecimal(latitude, latRef === 'S');
+        return gps.latitude;
     }
 
     async longitude() {
-        await this.extractExifData();
-        const longitude = EXIF.getTag(this.imageFile, 'GPSLongitude');
-        const lngRef = EXIF.getTag(this.imageFile, 'GPSLongitudeRef');
+        const gps = await this.gps();
 
-        if (!longitude || !lngRef) { throw 'No longitude data'; }
+        if (gps === null) { throw 'No longitude data'; }
 
-        return degMinSecToDecimal(longitude, lngRef === 'W');
+        return gps.longitude;
     }
 
-    async extractExifData() {
-        await new Promise(resolve => EXIF.getData(this.imageFile, resolve)); 
+    exif() {
+        if (this.exifPromise === null) {
+            this.exifPromise = exifr
+                .parse(this.imageFile, {gps: true})
+                .catch(() => null);
+        }
+
+        return this.exifPromise;
+    }
+
+    async gps() {
+        const exif = await this.exif();
+
+        if (!exif ||
+            !Number.isFinite(exif.latitude) ||
+            !Number.isFinite(exif.longitude)) {
+            return null;
+        }
+
+        return {latitude: exif.latitude, longitude: exif.longitude};
     }
 
     async getImageData() {
@@ -59,7 +66,7 @@ export default class Image {
             reader.onload = () => {
                 return resolve(reader.result);
             };
-            reader.readAsDataURL(this.imageFile, 'UTF-8');                    
+            reader.readAsDataURL(this.imageFile, 'UTF-8');
         });
     }
 

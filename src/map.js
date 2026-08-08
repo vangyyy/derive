@@ -95,6 +95,18 @@ export default class GpxMap {
         leaflet.easyButton({
             type: 'animate',
             states: [{
+                icon: 'fa-bolt fa-lg',
+                stateName: 'default',
+                title: 'Import activities from Strava',
+                onClick: () => {
+                    ui.buildStravaModal(this).show();
+                },
+            }],
+        }).addTo(this.map);
+
+        leaflet.easyButton({
+            type: 'animate',
+            states: [{
                 icon: 'fa-filter fa-lg',
                 stateName: 'default',
                 title: 'Filter displayed tracks',
@@ -126,7 +138,7 @@ export default class GpxMap {
 
         this.clearScroll();
         this.viewAll.disable();
-        this.switchTheme(this.options.theme);
+        this.options.theme = this.switchTheme(this.options.theme);
         this.requestBrowserLocation();
     }
 
@@ -138,12 +150,25 @@ export default class GpxMap {
     switchTheme(themeName) {
         if (this.mapTiles) {
             this.mapTiles.removeFrom(this.map);
+            this.mapTiles = null;
         }
 
-        if (themeName !== 'No map') {
-            this.mapTiles = leaflet.tileLayer.provider(themeName);
-            this.mapTiles.addTo(this.map, {detectRetina: true});
+        if (themeName === 'No map') {
+            return themeName;
         }
+
+        try {
+            this.mapTiles = leaflet.tileLayer.provider(themeName);
+        } catch (err) {
+            // Tile providers get retired (Stamen, for one). Saved options may
+            // still point at one, so fall back instead of breaking the map.
+            console.warn(`Falling back to ${DEFAULT_OPTIONS.theme}:`, err);
+            themeName = DEFAULT_OPTIONS.theme;
+            this.mapTiles = leaflet.tileLayer.provider(themeName);
+        }
+
+        this.mapTiles.addTo(this.map, {detectRetina: true});
+        return themeName;
     }
 
     saveOptions(opts) {
@@ -159,13 +184,18 @@ export default class GpxMap {
         opts = JSON.parse(opts);
 
         if (typeof opts === 'object') {
+            const savedTheme = opts.theme;
             this.updateOptions(opts);
+
+            if (this.options.theme !== savedTheme) {
+                this.saveOptions(this.options);
+            }
         }
     }
 
     updateOptions(opts) {
         if (opts.theme !== this.options.theme) {
-            this.switchTheme(opts.theme);
+            opts.theme = this.switchTheme(opts.theme);
         }
 
         if (opts.lineOptions.overrideExisting) {
@@ -252,13 +282,13 @@ export default class GpxMap {
 
             // Legacy support for file-ending colors:
             if (/-(Hike|Walk)\.gpx/.test(track.filename)) {
-                lineOptions.color = ACTIVITY_COLORS["hiking"];
+                lineOptions.color = ACTIVITY_COLORS['hiking'];
             } else if (/-Run\.gpx/.test(track.filename)) {
-                lineOptions.color = ACTIVITY_COLORS["running"];
+                lineOptions.color = ACTIVITY_COLORS['running'];
             } else if (/-Ride\.gpx/.test(track.filename)) {
-                lineOptions.color = ACTIVITY_COLORS["cycling"];
+                lineOptions.color = ACTIVITY_COLORS['cycling'];
             } else if (/-Swim\.gpx/.test(track.filename)) {
-                lineOptions.color = ACTIVITY_COLORS["swimming"];
+                lineOptions.color = ACTIVITY_COLORS['swimming'];
             }
         }
 

@@ -286,15 +286,8 @@ export default function extractTracks(file) {
 
     case 'skiz':
         return readFile(file, 'binary', isGzipped)
-            .then(contents => new Promise((resolve, reject) => {
-                parseSkizFile(contents, (err, result) => {
-                    if (err) {
-                        reject(err);
-                    } else {
-                        resolve(extractSKIZTracks(result));
-                    }
-                });
-            }));
+            .then(contents => parseSkizFile(contents))
+            .then(result => extractSKIZTracks(result));
 
     default:
         throw `Unsupported file format: ${format}`;

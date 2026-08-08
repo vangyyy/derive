@@ -8,13 +8,11 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - name: Read NVM version
-      run: echo "##[set-output name=NVMRC;]$(cat .nvmrc)"
-      id: nvm
+    - uses: actions/checkout@v4
     - name: Setup Node
-      uses: actions/setup-node@v1
+      uses: actions/setup-node@v4
       with:
-        node-version: "${{ steps.nvm.outputs.NVMRC }}"
+        node-version-file: .nvmrc
+        cache: npm
     - run: npm ci
     - run: npm run lint

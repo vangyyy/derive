@@ -1,22 +1,23 @@
 import picoModal from 'picomodal';
 import extractTracks from './track';
 import Image from './image';
+import * as strava from './strava';
 
 const AVAILABLE_THEMES = [
     'CartoDB.DarkMatter',
     'CartoDB.DarkMatterNoLabels',
     'CartoDB.Positron',
     'CartoDB.PositronNoLabels',
+    'CartoDB.Voyager',
+    'CartoDB.VoyagerNoLabels',
     'Esri.WorldImagery',
+    'Esri.WorldGrayCanvas',
+    'Esri.WorldTopoMap',
     'OpenStreetMap.Mapnik',
+    'OpenStreetMap.HOT',
     'OpenTopoMap',
-    'Stamen.Terrain',
-    'Stamen.TerrainBackground',
-    'Stamen.Toner',
-    'Stamen.TonerLite',
-    'Stamen.TonerBackground',
-    'Stamen.Watercolor',
     'CyclOSM',
+    'USGS.USImagery',
     'No map',
 ];
 
@@ -24,7 +25,8 @@ const MODAL_CONTENT = {
     help: `
 <h1>dérive</h1>
 <h4>Drag and drop one or more GPX/TCX/FIT/IGC/SKIZ files or JPEG images here.</h4>
-<p>If you use Strava, go to your
+<p>If you use Strava, you can pull your activities straight from the API with
+the <i class="fa fa-bolt"></i> button, or go to your
 <a href="https://www.strava.com/athlete/delete_your_account">account download
 page</a> and click "Request your archive". You'll get an email containing a ZIP
 file of all the GPS tracks you've logged so far. This can take several hours.
@@ -65,6 +67,31 @@ href="http://library.nothingness.org/articles/SI/en/display/314">[1]</a></cite>
 <p id="export-output"></p>
 `
 };
+
+
+function escapeHtml(text) {
+    const replacements = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        '\'': '&#39;',
+    };
+
+    return String(text).replace(/[&<>"']/g, c => replacements[c]);
+}
+
+// Replace the body of a modal without removing its close button. PicoModal
+// does not allow for native content overwriting.
+function overrideModalContent(modal, body) {
+    Array.from(modal.modalElem().childNodes).forEach(child => {
+        if (child !== modal.closeElem()) {
+            modal.modalElem().removeChild(child);
+        }
+    });
+
+    modal.modalElem().insertAdjacentHTML('afterbegin', body);
+}
 
 // Adapted from: http://www.html5rocks.com/en/tutorials/file/dndfiles/
 function handleFileSelect(map, evt) {
@@ -146,16 +173,7 @@ function buildUploadModal(numFiles) {
     modal.afterClose(() => modal.destroy());
 
     // Override the content of the modal, without removing the close button.
-    // PicoModal does not allow for native content overwriting.
-    modal.setContent = body => {
-        Array.from(modal.modalElem().childNodes).forEach(child => {
-            if (child !== modal.closeElem()) {
-                modal.modalElem().removeChild(child);
-            }
-        });
-
-        modal.modalElem().insertAdjacentHTML('afterbegin', body);
-    };
+    modal.setContent = body => overrideModalContent(modal, body);
 
     modal.addFailure = failure => {
         failures.push(failure);
@@ -400,12 +418,198 @@ export function showModal(type) {
 }
 
 
+function buildStravaProgressModal() {
+    let modal = picoModal({
+        content: '<h3>Importing from Strava</h3><p>Contacting Strava&hellip;</p>',
+        escCloses: false,
+        overlayClose: false,
+        overlayStyles: styles => {
+            styles.opacity = 0.1;
+        },
+    });
+
+    modal.afterCreate(() => {
+        modal.closeElem().style.display = 'none';
+    });
+
+    modal.afterClose(() => modal.destroy());
+
+    modal.setContent = body => overrideModalContent(modal, body);
+
+    modal.allowClose = () => {
+        modal.closeElem().style.display = '';
+        modal.options({escCloses: true, overlayClose: true});
+    };
+
+    return modal;
+}
+
+
+export async function importStravaActivities(map) {
+    let modal = buildStravaProgressModal();
+    modal.show();
+
+    try {
+        const {scanned, imported} = await strava.fetchActivities({
+            onTrack: track => map.addTrack(track),
+            onProgress: progress => modal.setContent(`
+                <h3>Importing from Strava</h3>
+                <p>${progress.imported} route${progress.imported === 1 ? '' : 's'}
+                   from ${progress.scanned} activities&hellip;</p>`),
+        });
+
+        map.center();
+
+        if (imported > 0) {
+            return modal.close();
+        }
+
+        modal.setContent(`
+            <h3>Nothing to import</h3>
+            <p>None of your ${scanned} Strava activities have a recorded route.</p>`);
+    } catch (err) {
+        console.error(err);
+        modal.setContent(`
+            <h3>Strava import failed</h3>
+            <p class="failures">${escapeHtml(err.message)}</p>`);
+    }
+
+    modal.allowClose();
+}
+
+
+export function buildStravaModal(map) {
+    const config = strava.loadConfig() || {};
+    const connected = strava.isAuthorized();
+
+    const actions = connected
+        ? `<button id="strava-import" type="button">Import activities</button>
+           <button id="strava-disconnect" type="button">Disconnect</button>`
+        : '<button id="strava-connect" type="button">Connect to Strava</button>';
+
+    const modalContent = `
+<h3>Import from Strava</h3>
+
+<p>dérive talks to the Strava API from your browser using <b>your own</b> API
+application, so your activities are never sent through a third party.</p>
+
+<ol>
+    <li>Create an application on
+        <a href="https://www.strava.com/settings/api" target="_blank"
+           rel="noopener noreferrer">strava.com/settings/api</a>.</li>
+    <li>Set its <i>Authorization Callback Domain</i> to
+        <code>${escapeHtml(window.location.hostname)}</code>.</li>
+    <li>Paste the credentials below.</li>
+</ol>
+
+<form id="strava-settings">
+    <span class="form-row">
+        <label>Client ID</label>
+        <input name="clientId" type="text" inputmode="numeric"
+            autocomplete="off" value="${escapeHtml(config.clientId || '')}">
+    </span>
+
+    <span class="form-row">
+        <label>Client secret</label>
+        <input name="clientSecret" type="password" autocomplete="off"
+            placeholder="${config.clientSecret ? 'unchanged' : ''}">
+    </span>
+
+    <span class="form-row">
+        <label>Token proxy URL</label>
+        <input name="tokenExchangeUrl" type="url" autocomplete="off"
+            placeholder="optional"
+            value="${escapeHtml(config.tokenExchangeUrl || '')}">
+    </span>
+</form>
+
+<p><small>Strava does not support PKCE, so the token exchange needs the client
+secret. It is stored in this browser only and sent to Strava alone. If you would
+rather not keep a secret in the browser, host a small endpoint that performs the
+exchange and put its URL in <i>Token proxy URL</i> instead.</small></p>
+
+<span class="form-row">${actions}</span>
+
+<p id="strava-status"></p>`;
+
+    let modal = picoModal({
+        content: modalContent,
+        closeButton: true,
+        escCloses: true,
+        overlayClose: true,
+        overlayStyles: (styles) => {
+            styles.opacity = 0.1;
+        },
+    });
+
+    modal.afterCreate(() => {
+        const elements = document.getElementById('strava-settings').elements;
+        const status = document.getElementById('strava-status');
+
+        const connectButton = document.getElementById('strava-connect');
+        if (connectButton) {
+            connectButton.addEventListener('click', () => {
+                try {
+                    strava.saveConfig({
+                        clientId: elements.clientId.value,
+                        clientSecret: elements.clientSecret.value || config.clientSecret,
+                        tokenExchangeUrl: elements.tokenExchangeUrl.value.trim(),
+                    });
+                    strava.beginAuthorization();
+                } catch (err) {
+                    status.className = 'failures';
+                    status.textContent = err.message;
+                }
+            });
+        }
+
+        const importButton = document.getElementById('strava-import');
+        if (importButton) {
+            importButton.addEventListener('click', () => {
+                modal.close();
+                importStravaActivities(map);
+            });
+        }
+
+        const disconnectButton = document.getElementById('strava-disconnect');
+        if (disconnectButton) {
+            disconnectButton.addEventListener('click', async () => {
+                await strava.disconnect();
+                strava.forgetConfig();
+                modal.close();
+            });
+        }
+    });
+
+    modal.afterClose(() => modal.destroy());
+
+    return modal;
+}
+
+
+async function handleStravaRedirect(map) {
+    try {
+        if (await strava.completeRedirect()) {
+            await importStravaActivities(map);
+        }
+    } catch (err) {
+        console.error(err);
+        let modal = buildStravaProgressModal();
+        modal.show();
+        modal.setContent(`
+            <h3>Strava authorization failed</h3>
+            <p class="failures">${escapeHtml(err.message)}</p>`);
+        modal.allowClose();
+    }
+}
+
+
 const INTRO_MODAL_SEEN_KEY = 'intro-modal-seen';
 
 export function initialize(map) {
     // We don't need to show the help modal every time, only the first
     // time the user sees the page.
-    let displayIntroModal = true;
+    let displayIntroModal = !strava.hasPendingRedirect();
 
     if (window.sessionStorage.getItem(INTRO_MODAL_SEEN_KEY) !== null) {
         displayIntroModal = false;
@@ -424,4 +628,6 @@ export function initialize(map) {
         }
         handleFileSelect(map, e);
     }, false);
+
+    handleStravaRedirect(map);
 }
