@@ -9,6 +9,9 @@ import * as ui from './ui';
 // Los Angeles is the center of the universe
 const INIT_COORDS = [34.0522, -118.243];
 
+// Zoom level used when explicitly centering on the browser's location.
+const LOCATION_ZOOM = 13;
+
 
 const DEFAULT_OPTIONS = {
     theme: 'CartoDB.DarkMatter',
@@ -127,6 +130,18 @@ export default class GpxMap {
                 title: 'Zoom to all tracks',
                 onClick: () => {
                     this.center();
+                },
+            }],
+        }).addTo(this.map);
+
+        leaflet.easyButton({
+            type: 'animate',
+            states: [{
+                icon: 'fa-location-arrow fa-lg',
+                stateName: 'default',
+                title: 'Center on my location',
+                onClick: () => {
+                    this.centerOnCurrentLocation();
                 },
             }],
         }).addTo(this.map);
@@ -265,6 +280,21 @@ export default class GpxMap {
                 this.clearScroll();
             }
         });
+    }
+
+    centerOnCurrentLocation() {
+        // Geolocation is unavailable on insecure origins.
+        if (!navigator.geolocation) {
+            return window.alert('Your browser will not share a location with this page.');
+        }
+
+        navigator.geolocation.getCurrentPosition(
+            pos => {
+                const zoom = Math.max(this.map.getZoom(), LOCATION_ZOOM);
+                this.map.setView([pos.coords.latitude, pos.coords.longitude], zoom);
+            },
+            err => window.alert(`Could not determine your location: ${err.message}`)
+        );
     }
 
     addTrack(track) {
