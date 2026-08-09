@@ -1,4 +1,5 @@
 import picoModal from 'picomodal';
+import JSZip from 'jszip';
 import extractTracks from './track';
 import Image from './image';
 import * as strava from './strava';
@@ -21,10 +22,15 @@ const AVAILABLE_THEMES = [
     'No map',
 ];
 
+const TRACK_FILE_PATTERN = /\.(gpx|tcx|fit|igc|skiz)(\.gz)?$/i;
+const IMAGE_FILE_PATTERN = /\.jpe?g$/i;
+const ZIP_FILE_PATTERN = /\.zip$/i;
+const STRAVA_ZIP_SKIPPED_FOLDERS = ['media', 'routes'];
+
 const MODAL_CONTENT = {
     help: `
 <h1>dérive</h1>
-<h4>Drag and drop one or more GPX/TCX/FIT/IGC/SKIZ files or JPEG images here.</h4>
+<h4>Drag and drop one or more GPX/TCX/FIT/IGC/SKIZ files, JPEG images, or a Strava export ZIP/folder here.</h4>
 <p>If you use Strava, you can pull your activities straight from the API with
 the <i class="fa fa-bolt"></i> button, or go to your
 <a href="https://www.strava.com/athlete/delete_your_account">account download
@@ -93,13 +99,150 @@ function overrideModalContent(modal, body) {
     modal.modalElem().insertAdjacentHTML('afterbegin', body);
 }
 
+function formatFailureReason(error) {
+    if (typeof error === 'string') {
+        return error;
+    }
+
+    if (error && typeof error.message === 'string' && error.message.length > 0) {
+        return error.message;
+    }
+
+    return 'Unknown error';
+}
+
 // Adapted from: http://www.html5rocks.com/en/tutorials/file/dndfiles/
-function handleFileSelect(map, evt) {
+function isImportableFile(fileName) {
+    return TRACK_FILE_PATTERN.test(fileName) || IMAGE_FILE_PATTERN.test(fileName);
+}
+
+function isImportableTrackFile(fileName) {
+    return TRACK_FILE_PATTERN.test(fileName);
+}
+
+function isZipArchive(fileName) {
+    return ZIP_FILE_PATTERN.test(fileName);
+}
+
+function inferMimeType(fileName) {
+    return IMAGE_FILE_PATTERN.test(fileName)
+        ? 'image/jpeg'
+        : 'application/octet-stream';
+}
+
+async function extractZipFiles(zipFile) {
+    const zip = await JSZip.loadAsync(zipFile);
+    const isSkippedPath = (entryName) => {
+        const segments = entryName
+            .toLowerCase()
+            .split('/')
+            .filter(Boolean);
+
+        return segments.some(segment => STRAVA_ZIP_SKIPPED_FOLDERS.includes(segment));
+    };
+
+    const entries = Object.values(zip.files).filter(entry => {
+        return !entry.dir &&
+            !isSkippedPath(entry.name) &&
+            isImportableTrackFile(entry.name);
+    });
+
+    const extractedEntries = await Promise.all(entries.map(async entry => {
+        const contents = await entry.async('blob');
+        const fileName = entry.name.split('/').pop();
+
+        return new File([contents], fileName, {
+            type: inferMimeType(fileName),
+            lastModified: zipFile.lastModified || Date.now(),
+        });
+    }));
+
+    return extractedEntries;
+}
+
+async function normalizeDroppedFile(file) {
+    if (isImportableFile(file.name)) {
+        return [file];
+    }
+
+    if (isZipArchive(file.name)) {
+        return extractZipFiles(file);
+    }
+
+    return [];
+}
+
+function readDroppedEntryFile(entry) {
+    return new Promise((resolve, reject) => {
+        entry.file(resolve, reject);
+    });
+}
+
+function readDroppedDirectoryEntries(reader) {
+    return new Promise((resolve, reject) => {
+        reader.readEntries(resolve, reject);
+    });
+}
+
+async function collectDroppedEntryFiles(entry) {
+    if (entry.isFile) {
+        const file = await readDroppedEntryFile(entry);
+        return normalizeDroppedFile(file);
+    }
+
+    if (!entry.isDirectory) {
+        return [];
+    }
+
+    const entries = [];
+    const reader = entry.createReader();
+
+    // FileSystemDirectoryReader returns entries in batches.
+    while (true) {
+        const batch = await readDroppedDirectoryEntries(reader);
+        if (batch.length === 0) {
+            break;
+        }
+        entries.push(...batch);
+    }
+
+    const nestedFiles = await Promise.all(entries.map(collectDroppedEntryFiles));
+    return nestedFiles.flat();
+}
+
+async function getDroppedFiles(evt) {
+    const items = Array.from(evt.dataTransfer.items || []);
+    const canReadEntries = items.some(item => typeof item.webkitGetAsEntry === 'function');
+
+    if (canReadEntries) {
+        const entries = items
+            .map(item => item.webkitGetAsEntry())
+            .filter(Boolean);
+
+        const droppedFiles = await Promise.all(entries.map(collectDroppedEntryFiles));
+        return droppedFiles.flat();
+    }
+
+    return Array
+        .from(evt.dataTransfer.files || [])
+        .map(normalizeDroppedFile)
+        .reduce(async (allFilesPromise, filesPromise) => {
+            const [allFiles, files] = await Promise.all([allFilesPromise, filesPromise]);
+            return allFiles.concat(files);
+        }, Promise.resolve([]));
+}
+
+async function handleFileSelect(map, evt) {
     evt.stopPropagation();
     evt.preventDefault();
 
     let tracks = [];
-    let files = Array.from(evt.dataTransfer.files);
+    let files = await getDroppedFiles(evt);
+
+    if (files.length === 0) {
+        return;
+    }
+
     let modal = buildUploadModal(files.length);
 
     modal.show();
@@ -123,7 +266,7 @@ function handleFileSelect(map, evt) {
 
     const handleFile = async file => {
         try {
-            if (/\.jpe?g$/i.test(file.name)) {
+            if (IMAGE_FILE_PATTERN.test(file.name)) {
                 return await handleImage(file);
             }
             return await handleTrackFile(file);
@@ -176,7 +319,10 @@ function buildUploadModal(numFiles) {
     modal.setContent = body => overrideModalContent(modal, body);
 
     modal.addFailure = failure => {
-        failures.push(failure);
+        failures.push({
+            name: failure.name,
+            reason: formatFailureReason(failure.error),
+        });
         modal.setContent(getModalContent());
     };
 
@@ -191,7 +337,9 @@ function buildUploadModal(numFiles) {
             return modal.close();
         }
 
-        let failedItems = failures.map(failure => `<li>${failure.name}</li>`);
+        let failedItems = failures.map(failure => {
+            return `<li><b>${escapeHtml(failure.name)}</b>: ${escapeHtml(failure.reason)}</li>`;
+        });
         modal.setContent(`
             <h1>Files loaded</h1>
             <p>

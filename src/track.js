@@ -34,6 +34,11 @@ function extractGPXTracks(gpx) {
     const tracks = queryElements(gpx, 'trk');
     const routes = queryElements(gpx, 'rte');
 
+    if (tracks.length === 0 && routes.length > 0) {
+        // Ignore route-only GPX files; we only import activity tracks.
+        return [];
+    }
+
     if (tracks.length === 0 && routes.length === 0) {
         console.log('GPX file has neither tracks nor routes!', gpx);
         throw new Error('Unexpected gpx file format.');
@@ -71,33 +76,6 @@ function extractGPXTracks(gpx) {
             if (points.length > 0) {
                 parsedTracks.push({ timestamp, points, name, activityType });
             }
-        }
-    }
-
-    for (const rte of routes) {
-        const name = getTextContent(rte, 'name') || 'untitled';
-        let timestamp;
-        const points = [];
-
-        for (const pt of queryElements(rte, 'rtept')) {
-            const timeEl = pt.querySelector('time');
-            if (timeEl && timeEl.textContent) {
-                timestamp = new Date(timeEl.textContent);
-            }
-
-            const lat = pt.getAttribute('lat');
-            const lon = pt.getAttribute('lon');
-
-            if (lat !== null && lon !== null) {
-                points.push({
-                    lat: parseFloat(lat),
-                    lng: parseFloat(lon),
-                });
-            }
-        }
-
-        if (points.length > 0) {
-            parsedTracks.push({ timestamp, points, name });
         }
     }
 
