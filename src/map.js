@@ -40,11 +40,26 @@ const ACTIVITY_COLORS = {
     'swimming': '#0000ff',
 };
 
+const TRACK_COORD_PRECISION = 6;
+
+function buildTrackSignature(track) {
+    if (!track || !Array.isArray(track.points) || track.points.length === 0) {
+        return null;
+    }
+
+    const pointsSignature = track.points
+        .map(({lat, lng}) => `${lat.toFixed(TRACK_COORD_PRECISION)},${lng.toFixed(TRACK_COORD_PRECISION)}`)
+        .join('|');
+
+    return `${track.points.length}:${pointsSignature}`;
+}
+
 
 export default class GpxMap {
     constructor(options) {
         this.options = options || DEFAULT_OPTIONS;
         this.tracks = [];
+        this.trackSignatures = new Set();
         this.filters = {
             minDate: null,
             maxDate: null,
@@ -298,6 +313,11 @@ export default class GpxMap {
     }
 
     addTrack(track) {
+        const signature = buildTrackSignature(track);
+        if (signature && this.trackSignatures.has(signature)) {
+            return false;
+        }
+
         this.viewAll.enable();
         let lineOptions = Object.assign({}, this.options.lineOptions);
 
@@ -326,6 +346,12 @@ export default class GpxMap {
         line.addTo(this.map);
 
         this.tracks.push(Object.assign({line, visible: true}, track));
+
+        if (signature) {
+            this.trackSignatures.add(signature);
+        }
+
+        return true;
     }
 
     async markerClick(image) {

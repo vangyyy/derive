@@ -236,7 +236,6 @@ async function handleFileSelect(map, evt) {
     evt.stopPropagation();
     evt.preventDefault();
 
-    let tracks = [];
     let files = await getDroppedFiles(evt);
 
     if (files.length === 0) {
@@ -258,9 +257,12 @@ async function handleFileSelect(map, evt) {
     const handleTrackFile = async (file) => {
         for (const track of await extractTracks(file)) {
             track.filename = file.name;
-            tracks.push(track);
-            map.addTrack(track);
-            modal.addSuccess();
+
+            if (map.addTrack(track)) {
+                modal.addSuccess();
+            } else {
+                modal.addSkippedDuplicate();
+            }
         }
     };
 
@@ -292,11 +294,18 @@ function handleDragOver(evt) {
 
 function buildUploadModal(numFiles) {
     let numLoaded = 0;
+    let numSkippedDuplicates = 0;
     let failures = [];
-    let failureString = failures.length ? `, <span class='failures'>${failures.length} failed</span>` : '';
-    let getModalContent = () => `
+    let getModalContent = () => {
+        let failureString = failures.length
+            ? `, <span class='failures'>${failures.length} failed</span>`
+            : '';
+
+        return `
         <h1>Reading files...</h1>
-        <p>${numLoaded} loaded${failureString} of <b>${numFiles}</b></p>`;
+        <p>${numLoaded} loaded${failureString} of <b>${numFiles}</b></p>
+        <p>${numSkippedDuplicates} duplicate${numSkippedDuplicates === 1 ? '' : 's'} skipped</p>`;
+    };
 
     let modal = picoModal({
         content: getModalContent(),
@@ -331,24 +340,31 @@ function buildUploadModal(numFiles) {
         modal.setContent(getModalContent());
     };
 
+    modal.addSkippedDuplicate = () => {
+        numSkippedDuplicates++;
+        modal.setContent(getModalContent());
+    };
+
     // Show any errors, or close modal if no errors occurred
     modal.finished = () => {
-        if (failures.length === 0) {
-            return modal.close();
-        }
-
         let failedItems = failures.map(failure => {
             return `<li><b>${escapeHtml(failure.name)}</b>: ${escapeHtml(failure.reason)}</li>`;
         });
+        const failureDetails = failures.length > 0
+            ? `<ul class="failures">${failedItems.join('')}</ul>`
+            : '<p>No failures.</p>';
+
         modal.setContent(`
-            <h1>Files loaded</h1>
+            <h1>Import complete</h1>
             <p>
-                Loaded ${numLoaded},
-                <span class="failures">
-                    ${failures.length} failure${failures.length === 1 ? '' : 's'}:
-                </span>
+                Processed <b>${numFiles}</b> file${numFiles === 1 ? '' : 's'}.
             </p>
-            <ul class="failures">${failedItems.join('')}</ul>`);
+            <p>
+                Loaded: <b>${numLoaded}</b><br>
+                Duplicates skipped: <b>${numSkippedDuplicates}</b><br>
+                Failures: <b>${failures.length}</b>
+            </p>
+            ${failureDetails}`);
         // enable all the methods of closing the window
         modal.closeElem().style.display = '';
         modal.options({
@@ -634,12 +650,13 @@ export async function importStravaActivities(map) {
     modal.show();
 
     try {
-        const {scanned, imported} = await strava.fetchActivities({
+        const {scanned, imported, skipped} = await strava.fetchActivities({
             onTrack: track => map.addTrack(track),
             onProgress: progress => modal.setContent(`
                 <h3>Importing from Strava</h3>
                 <p>${progress.imported} route${progress.imported === 1 ? '' : 's'}
-                   from ${progress.scanned} activities&hellip;</p>`),
+                   imported from ${progress.scanned} activities,
+                   ${progress.skipped} duplicate${progress.skipped === 1 ? '' : 's'} skipped&hellip;</p>`),
         });
 
         map.center();
@@ -650,7 +667,8 @@ export async function importStravaActivities(map) {
 
         modal.setContent(`
             <h3>Nothing to import</h3>
-            <p>None of your ${scanned} Strava activities have a recorded route.</p>`);
+            <p>None of your ${scanned} Strava activities added a new route.
+               ${skipped} duplicate${skipped === 1 ? '' : 's'} were skipped.</p>`);
     } catch (err) {
         console.error(err);
         modal.setContent(`

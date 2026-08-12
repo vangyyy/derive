@@ -258,7 +258,9 @@ function activityToTrack(activity) {
 }
 
 // Walks the athlete's activity list, invoking onTrack for every activity that
-// has a recorded route. onProgress receives running counts after each page.
+// has a recorded route. If onTrack returns false, the activity is treated as
+// skipped (for example due to deduplication). onProgress receives running
+// counts after each page.
 export async function fetchActivities({onTrack, onProgress}) {
     const accessToken = await getAccessToken();
 
@@ -268,6 +270,7 @@ export async function fetchActivities({onTrack, onProgress}) {
 
     let scanned = 0;
     let imported = 0;
+    let skipped = 0;
 
     for (let page = 1; page <= MAX_PAGES; page++) {
         const params = new URLSearchParams({'per_page': PER_PAGE, page});
@@ -290,17 +293,21 @@ export async function fetchActivities({onTrack, onProgress}) {
             const track = activityToTrack(activity);
 
             if (track) {
-                imported++;
-                onTrack(track);
+                const wasImported = await onTrack(track);
+                if (wasImported !== false) {
+                    imported++;
+                } else {
+                    skipped++;
+                }
             }
         }
 
-        onProgress({scanned, imported});
+        onProgress({scanned, imported, skipped});
 
         if (activities.length < PER_PAGE) {
             break;
         }
     }
 
-    return {scanned, imported};
+    return {scanned, imported, skipped};
 }
