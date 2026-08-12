@@ -86,3 +86,21 @@ ul.failures {
     padding-top: 1em;
     padding-bottom: 1em;
 }
+
+.summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 6px 16px;
+    margin: 12px 0;
+}
+
+.summary-grid p {
+    margin: 0;
+}
+
+.summary-list {
+    margin-top: 6px;
+    margin-bottom: 0;
+    max-height: 180px;
+    overflow-y: auto;
+}

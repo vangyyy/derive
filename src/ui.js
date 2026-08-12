@@ -111,6 +111,25 @@ function formatFailureReason(error) {
     return 'Unknown error';
 }
 
+function formatNumber(value, maxFractionDigits = 2) {
+    return Number(value || 0).toLocaleString(undefined, {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: maxFractionDigits,
+    });
+}
+
+function formatDate(value) {
+    if (!(value instanceof Date) || isNaN(value)) {
+        return 'n/a';
+    }
+
+    return value.toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+    });
+}
+
 // Adapted from: http://www.html5rocks.com/en/tutorials/file/dndfiles/
 function isImportableFile(fileName) {
     return TRACK_FILE_PATTERN.test(fileName) || IMAGE_FILE_PATTERN.test(fileName);
@@ -601,6 +620,47 @@ export function buildFilterModal(tracks, filters, finishCallback) {
         finishCallback(updated);
         modal.destroy();
     });
+
+    return modal;
+}
+
+export function buildSummaryModal(summary) {
+    const activityBreakdown = Object.entries(summary.activities || {})
+        .sort((a, b) => b[1] - a[1])
+        .map(([activity, count]) => `<li><b>${escapeHtml(activity)}</b>: ${count}</li>`)
+        .join('');
+
+    const activitiesContent = activityBreakdown.length > 0
+        ? `<ul class="summary-list">${activityBreakdown}</ul>`
+        : '<p>No activity type data available.</p>';
+
+    const modalContent = `
+<h3>Summary</h3>
+
+<div class="summary-grid">
+    <p><b>Total distance:</b> ${formatNumber(summary.totalDistanceKm)} km</p>
+    <p><b>Visible distance:</b> ${formatNumber(summary.visibleDistanceKm)} km</p>
+    <p><b>Tracks:</b> ${summary.visibleTracks} visible / ${summary.totalTracks} total</p>
+    <p><b>Total points:</b> ${formatNumber(summary.totalPoints, 0)}</p>
+    <p><b>Avg distance/track:</b> ${formatNumber(summary.averageDistanceKm)} km</p>
+    <p><b>Longest track:</b> ${formatNumber(summary.longestTrackKm)} km</p>
+    <p><b>Date range:</b> ${formatDate(summary.startDate)} to ${formatDate(summary.endDate)}</p>
+</div>
+
+<h4>Activity mix</h4>
+${activitiesContent}`;
+
+    let modal = picoModal({
+        content: modalContent,
+        closeButton: true,
+        escCloses: true,
+        overlayClose: true,
+        overlayStyles: (styles) => {
+            styles.opacity = 0.1;
+        },
+    });
+
+    modal.afterClose(modal => modal.destroy());
 
     return modal;
 }

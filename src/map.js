@@ -54,6 +54,21 @@ function buildTrackSignature(track) {
     return `${track.points.length}:${pointsSignature}`;
 }
 
+function getTrackDistanceKm(points) {
+    if (!Array.isArray(points) || points.length < 2) {
+        return 0;
+    }
+
+    let distanceMeters = 0;
+    for (let i = 1; i < points.length; i++) {
+        const prev = leaflet.latLng(points[i - 1].lat, points[i - 1].lng);
+        const current = leaflet.latLng(points[i].lat, points[i].lng);
+        distanceMeters += prev.distanceTo(current);
+    }
+
+    return distanceMeters / 1000;
+}
+
 
 export default class GpxMap {
     constructor(options) {
@@ -134,6 +149,18 @@ export default class GpxMap {
                         this.applyFilters();
                     }).show();
                 }
+            }]
+        }).addTo(this.map);
+
+        leaflet.easyButton({
+            type: 'animate',
+            states: [{
+                icon: 'fa-bar-chart fa-lg',
+                stateName: 'default',
+                title: 'Show track summary',
+                onClick: () => {
+                    ui.buildSummaryModal(this.getSummaryStats()).show();
+                },
             }]
         }).addTo(this.map);
 
@@ -496,5 +523,52 @@ export default class GpxMap {
                 domNode.appendChild(link);
             }
         });
+    }
+
+    getSummaryStats() {
+        let totalDistanceKm = 0;
+        let visibleDistanceKm = 0;
+        let totalPoints = 0;
+        let longestTrackKm = 0;
+        let visibleTracks = 0;
+        const activities = {};
+        const timestampedTracks = [];
+
+        for (const track of this.tracks) {
+            const distanceKm = getTrackDistanceKm(track.points);
+            totalDistanceKm += distanceKm;
+            totalPoints += track.points.length;
+            longestTrackKm = Math.max(longestTrackKm, distanceKm);
+
+            if (track.visible) {
+                visibleTracks++;
+                visibleDistanceKm += distanceKm;
+            }
+
+            if (track.timestamp instanceof Date && !isNaN(track.timestamp)) {
+                timestampedTracks.push(track.timestamp);
+            }
+
+            const activityName = (track.activityType || 'unknown').toLowerCase();
+            activities[activityName] = (activities[activityName] || 0) + 1;
+        }
+
+        const totalTracks = this.tracks.length;
+        const averageDistanceKm = totalTracks === 0 ? 0 : totalDistanceKm / totalTracks;
+
+        timestampedTracks.sort((a, b) => a - b);
+
+        return {
+            totalTracks,
+            visibleTracks,
+            totalDistanceKm,
+            visibleDistanceKm,
+            averageDistanceKm,
+            longestTrackKm,
+            totalPoints,
+            startDate: timestampedTracks[0] || null,
+            endDate: timestampedTracks[timestampedTracks.length - 1] || null,
+            activities,
+        };
     }
 }
